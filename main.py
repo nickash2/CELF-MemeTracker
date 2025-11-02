@@ -2,20 +2,25 @@
 Main entry point for running CELF influence maximization.
 
 Supports loading graphs from edge lists, optional cost files, and computing
-both optimal seed sets and online bounds.
+both optimal seed sets and online bounds with performance tracking.
 """
 
 from __future__ import annotations
 
 import argparse
 import random
+import time
 from typing import Optional, Sequence
 
 from src import (
+    CELFResult,
+    PerformanceTracker,
     compute_online_bound,
     load_costs_from_file,
     load_graph_from_file,
+    plot_bounds_comparison,
     run_celf,
+    save_results,
 )
 
 
@@ -138,6 +143,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if args.verbose and costs:
         print(f"  Loaded costs for {len(costs)} nodes")
 
+    # Track performance
+    tracker = PerformanceTracker()
+    tracker.start()
+
     # Run CELF
     if args.verbose:
         print(f"\nRunning CELF with budget={budget}, simulations={args.simulations}...")
@@ -150,6 +159,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         rng=rng,
     )
 
+    tracker.stop()
+
     # Print results
     print("\n" + "=" * 60)
     print("CELF RESULTS")
@@ -157,24 +168,49 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"Selected seeds ({mode}):", ", ".join(seeds))
     print(f"Total cost: {total_cost:.3f} / {budget:.3f}")
     print(f"Estimated spread: {spread:.3f}")
+    print(f"Runtime: {tracker.elapsed():.3f}s")
 
     # Compute bound if requested
+    online_bound = None
     if args.compute_bound:
         if args.verbose:
             print("\nComputing online bound...")
 
-        bound = compute_online_bound(
+        online_bound = compute_online_bound(
             graph,
             budget=budget,
             simulations=args.simulations,
             costs=costs,
             rng=rng,
         )
-        print(f"Online bound R^: {bound:.3f}")
-        if spread > 0:
-            print(f"Approximation ratio: {spread / bound:.3f}")
+        print(f"Online bound R^: {online_bound:.3f}")
+        if spread > 0 and online_bound > 0:
+            print(f"Approximation ratio: {spread / online_bound:.3f}")
 
     print("=" * 60)
+
+    # Save results
+    result = CELFResult(
+        seeds=seeds,
+        spread=spread,
+        total_cost=total_cost,
+        mode=mode,
+        budget=budget,
+        simulations=args.simulations,
+        runtime_seconds=tracker.elapsed(),
+        num_nodes=len(graph.nodes),
+        online_bound=online_bound,
+    )
+
+    # Generate outputs
+    timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_results(result, f"results/celf_result_{timestamp}.json")
+
+    if args.compute_bound and online_bound is not None:
+        plot_bounds_comparison(
+            result,
+            output_path=f"results/figures/bounds_comparison_{timestamp}.png",
+        )
 
 
 if __name__ == "__main__":

@@ -8,11 +8,28 @@ from .celf import (
     run_celf,
     simulate_independent_cascade,
 )
+from .evaluation import (
+    CELFResult,
+    HeuristicComparison,
+    PerformanceTracker,
+    create_summary_report,
+    load_results,
+    plot_bounds_comparison,
+    plot_marginal_gains,
+    plot_runtime_comparison,
+    plot_spread_comparison,
+    plot_spread_vs_budget,
+    save_results,
+)
 from .preprocessing import (
+    MemeTrackerDocument,
     build_graph_from_cascades,
+    build_graph_from_memetracker,
+    build_memetracker_cascade,
     estimate_propagation_probability,
     load_costs_from_file,
     load_graph_from_file,
+    parse_memetracker_file,
 )
 
 __all__ = [
@@ -23,7 +40,22 @@ __all__ = [
     "run_celf",
     "simulate_independent_cascade",
     "build_graph_from_cascades",
+    "build_graph_from_memetracker",
+    "build_memetracker_cascade",
     "estimate_propagation_probability",
     "load_costs_from_file",
     "load_graph_from_file",
+    "MemeTrackerDocument",
+    "parse_memetracker_file",
+    "CELFResult",
+    "HeuristicComparison",
+    "PerformanceTracker",
+    "create_summary_report",
+    "load_results",
+    "plot_bounds_comparison",
+    "plot_marginal_gains",
+    "plot_runtime_comparison",
+    "plot_spread_comparison",
+    "plot_spread_vs_budget",
+    "save_results",
 ]

@@ -1,0 +1,12 @@
+# Core dependencies for CELF algorithm
+# No external packages required for basic algorithm
+
+# Visualization and analysis (optional, for results/)
+matplotlib>=3.5.0
+numpy>=1.21.0
+networkx
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# black>=22.0.0
+# mypy>=0.950
