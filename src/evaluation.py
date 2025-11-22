@@ -11,7 +11,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -370,3 +370,217 @@ def create_summary_report(
         f.write("\n" + "=" * 80 + "\n")
 
     print(f"Summary report saved to {output_path}")
+
+
+def plot_penalty_reduction_comparison(
+    algorithm_results: Dict[str, List[Tuple[int, float]]],
+    output_path: str = "results/figures/penalty_reduction_comparison.png",
+    title: str = "Penalty Reduction vs Number of Sensors",
+    ylabel: str = "Penalty Reduction",
+    objective_name: str = "Population Affected",
+) -> None:
+    """Plot penalty reduction vs number of sensors for multiple algorithms.
+
+    Args:
+        algorithm_results: Dict mapping algorithm name to list of (num_sensors, penalty_value) tuples.
+        output_path: Path to save the plot.
+        title: Plot title.
+        ylabel: Y-axis label.
+        objective_name: Name of the objective being measured.
+    """
+    plt.figure(figsize=(12, 7))
+
+    # Plot each algorithm
+    colors = plt.cm.tab10(np.linspace(0, 1, len(algorithm_results)))
+    markers = ["o", "s", "^", "D", "v", "*", "P", "X", "h", "p"]
+
+    for (alg_name, data), color, marker in zip(
+        algorithm_results.items(), colors, markers
+    ):
+        if not data:
+            continue
+
+        # Sort by number of sensors
+        data_sorted = sorted(data, key=lambda x: x[0])
+        num_sensors = [x[0] for x in data_sorted]
+        penalties = [x[1] for x in data_sorted]
+
+        plt.plot(
+            num_sensors,
+            penalties,
+            marker=marker,
+            label=alg_name,
+            linewidth=2.5,
+            markersize=8,
+            alpha=0.85,
+            color=color,
+        )
+
+    plt.xlabel("Number of Sites", fontsize=13, fontweight="bold")
+    plt.ylabel(ylabel, fontsize=13, fontweight="bold")
+    plt.title(title, fontsize=15, fontweight="bold", pad=20)
+    plt.legend(fontsize=11, loc="best", framealpha=0.95)
+    plt.grid(True, alpha=0.3, linestyle="--")
+    plt.tight_layout()
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"Plot saved to {output_path}")
+
+
+def plot_multi_objective_comparison(
+    algorithm_results: Dict[str, Dict[str, List[Tuple[int, float]]]],
+    output_path: str = "results/figures/multi_objective_comparison.png",
+) -> None:
+    """Plot all three objectives (DL, DT, PA) in a multi-panel figure.
+
+    Args:
+        algorithm_results: Dict with structure:
+            {algorithm_name: {objective: [(num_sensors, value), ...]}}
+        output_path: Path to save the plot.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+    objectives_info = [
+        ("DL", "Detection Likelihood", "Detection Rate", True),
+        ("DT", "Detection Time Reduction", "Time Reduction", True),
+        ("PA", "Population Affected Reduction", "Reduction in Population", True),
+    ]
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(algorithm_results)))
+    markers = ["o", "s", "^", "D", "v", "*", "P", "X", "h", "p"]
+
+    for ax, (obj_key, obj_title, ylabel, higher_better) in zip(axes, objectives_info):
+        for (alg_name, obj_data), color, marker in zip(
+            algorithm_results.items(), colors, markers
+        ):
+            if obj_key not in obj_data or not obj_data[obj_key]:
+                continue
+
+            data_sorted = sorted(obj_data[obj_key], key=lambda x: x[0])
+            num_sensors = [x[0] for x in data_sorted]
+            values = [x[1] for x in data_sorted]
+
+            ax.plot(
+                num_sensors,
+                values,
+                marker=marker,
+                label=alg_name,
+                linewidth=2.5,
+                markersize=8,
+                alpha=0.85,
+                color=color,
+            )
+
+        ax.set_xlabel("Cost", fontsize=12, fontweight="bold")
+        ax.set_ylabel(ylabel, fontsize=12, fontweight="bold")
+        ax.set_title(obj_title, fontsize=13, fontweight="bold")
+        ax.legend(fontsize=9, loc="best", framealpha=0.9)
+        ax.grid(True, alpha=0.3, linestyle="--")
+
+    plt.tight_layout()
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"Multi-objective plot saved to {output_path}")
+
+
+def plot_normalized_comparison(
+    algorithm_results: Dict[str, List[Tuple[int, float]]],
+    output_path: str = "results/figures/normalized_comparison.png",
+    title: str = "Normalized Performance Comparison",
+    objective_name: str = "Population Affected",
+) -> None:
+    """Plot normalized performance where best algorithm at each budget = 1.0.
+
+    Args:
+        algorithm_results: Dict mapping algorithm name to list of (num_sensors, penalty_value).
+        output_path: Path to save the plot.
+        title: Plot title.
+        objective_name: Name of objective (affects whether lower or higher is better).
+    """
+    plt.figure(figsize=(12, 7))
+
+    # Determine if lower is better
+    lower_is_better = objective_name in ["Detection Time", "Population Affected"]
+
+    # Organize data by budget
+    all_budgets = set()
+    for data in algorithm_results.values():
+        all_budgets.update(x[0] for x in data)
+    all_budgets = sorted(all_budgets)
+
+    # Create mapping: budget -> {algorithm: value}
+    budget_data: Dict[int, Dict[str, float]] = {b: {} for b in all_budgets}
+    for alg_name, data in algorithm_results.items():
+        for num_sensors, value in data:
+            budget_data[num_sensors][alg_name] = value
+
+    # Normalize: find best value at each budget
+    normalized_results: Dict[str, List[Tuple[int, float]]] = {
+        alg: [] for alg in algorithm_results.keys()
+    }
+
+    for budget in all_budgets:
+        values_at_budget = budget_data[budget]
+        if not values_at_budget:
+            continue
+
+        # Find best value
+        if lower_is_better:
+            best_value = min(values_at_budget.values())
+        else:
+            best_value = max(values_at_budget.values())
+
+        # Normalize each algorithm's value
+        for alg_name, value in values_at_budget.items():
+            if best_value == 0:
+                normalized = 1.0 if value == 0 else 0.0
+            else:
+                if lower_is_better:
+                    # Invert so 1.0 is best
+                    normalized = best_value / value if value > 0 else 0.0
+                else:
+                    normalized = value / best_value
+
+            normalized_results[alg_name].append((budget, normalized))
+
+    # Plot normalized results
+    colors = plt.cm.tab10(np.linspace(0, 1, len(normalized_results)))
+    markers = ["o", "s", "^", "D", "v", "*", "P", "X", "h", "p"]
+
+    for (alg_name, data), color, marker in zip(
+        normalized_results.items(), colors, markers
+    ):
+        if not data:
+            continue
+
+        data_sorted = sorted(data, key=lambda x: x[0])
+        budgets = [x[0] for x in data_sorted]
+        norm_values = [x[1] for x in data_sorted]
+
+        plt.plot(
+            budgets,
+            norm_values,
+            marker=marker,
+            label=alg_name,
+            linewidth=2.5,
+            markersize=8,
+            alpha=0.85,
+            color=color,
+        )
+
+    plt.xlabel("Number of Sites", fontsize=13, fontweight="bold")
+    plt.ylabel("Normalized Performance (Best = 1.0)", fontsize=13, fontweight="bold")
+    plt.title(title, fontsize=15, fontweight="bold", pad=20)
+    plt.legend(fontsize=11, loc="best", framealpha=0.95)
+    plt.grid(True, alpha=0.3, linestyle="--")
+    plt.axhline(y=1.0, color="red", linestyle="--", linewidth=1.5, alpha=0.5)
+    plt.ylim(bottom=0)
+    plt.tight_layout()
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"Normalized comparison plot saved to {output_path}")

@@ -65,12 +65,6 @@ def main():
         help="Monte Carlo simulations (default: 1000)",
     )
     parser.add_argument(
-        "--decay-rate",
-        type=float,
-        default=0.01,
-        help="Temporal decay rate for influence prob (default: 0.01)",
-    )
-    parser.add_argument(
         "--min-prob",
         type=float,
         default=0.01,
@@ -98,13 +92,11 @@ def main():
     print(f"\n1. Building influence graph from {args.input}")
     print(f"   Max documents: {args.max_docs}")
     print(f"   Top memes: {args.top_memes}")
-    print(f"   Decay rate: {args.decay_rate}")
     print(f"   Min probability: {args.min_prob}\n")
 
     graph, cascades = build_graph_from_memetracker(
         path=args.input,
         top_memes=args.top_memes,
-        decay_rate=args.decay_rate,
         min_prob=args.min_prob,
         max_documents=args.max_docs,
     )

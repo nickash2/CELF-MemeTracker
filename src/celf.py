@@ -276,3 +276,167 @@ def compute_online_bound(
                 r_hat += lam * deltas[best]
 
     return r_hat
+
+
+def greedy_outbreak_detection(
+    graph: InfluenceGraph,
+    cascades: Dict[str, List[Tuple[str, float]]],
+    budget: int,
+    objective: str = "PA",
+    T_max: float = 100.0,
+    costs: Optional[Mapping[str, float]] = None,
+) -> List[str]:
+    """
+    Greedy algorithm for outbreak detection (no lazy evaluation).
+
+    Same as CELF but recomputes marginal gain for ALL nodes every iteration.
+    """
+    from .objectives import compute_cascade_penalties
+
+    base_costs = costs or {}
+    selected: List[str] = []
+    selected_set: Set[str] = set()
+    current_cost = 0.0
+    budget_cost = float(budget)
+
+    def evaluate_penalty(sites: List[str]) -> float:
+        if not sites:
+            return float("inf")
+        penalties = []
+        for cascade in cascades.values():
+            dl, dt, pa = compute_cascade_penalties(graph, sites, cascade, T_max)
+            if objective == "DL":
+                penalties.append(dl)
+            elif objective == "DT":
+                penalties.append(dt)
+            elif objective == "PA":
+                penalties.append(pa)
+        return sum(penalties) / len(penalties) if penalties else float("inf")
+
+    current_penalty = evaluate_penalty(list(graph.nodes)[:1]) if graph.nodes else 0.0
+
+    # Greedy selection (recompute all gains each iteration)
+    while current_cost < budget_cost:
+        best_node = None
+        best_gain = -float("inf")
+
+        for node in graph.nodes:
+            if node in selected_set:
+                continue
+            cost = base_costs.get(node, 1.0)
+            if current_cost + cost > budget_cost:
+                continue
+
+            # Compute marginal gain
+            new_penalty = evaluate_penalty(selected + [node])
+            gain = current_penalty - new_penalty
+
+            if gain > best_gain:
+                best_gain = gain
+                best_node = node
+
+        if best_node is None:
+            break
+
+        selected.append(best_node)
+        selected_set.add(best_node)
+        current_cost += base_costs.get(best_node, 1.0)
+        current_penalty -= best_gain
+
+    return selected
+
+
+def celf_outbreak_detection(
+    graph: InfluenceGraph,
+    cascades: Dict[str, List[Tuple[str, float]]],
+    budget: int,
+    objective: str = "PA",  # "DL", "DT", or "PA"
+    T_max: float = 100.0,
+    costs: Optional[Mapping[str, float]] = None,
+) -> List[str]:
+    """
+    CELF for outbreak detection using observed cascades.
+    No Monte Carlo - evaluates exactly on all cascades.
+
+    Args:
+        graph: Influence graph
+        cascades: Dict of meme_id -> [(site, time), ...]
+        budget: Number of monitors to select
+        objective: "DL" (detection likelihood), "DT" (detection time), or "PA" (population affected)
+        T_max: Maximum time horizon
+        costs: Optional node costs (default: 1.0 per node)
+
+    Returns:
+        List of selected monitoring sites
+    """
+    from .objectives import (
+        compute_cascade_penalties,
+    )  # Import here to avoid circular dependency
+
+    base_costs = costs or {}
+    selected: List[str] = []
+    selected_set: Set[str] = set()
+
+    # Helper: compute average penalty on all cascades
+    def evaluate_penalty(sites: List[str]) -> float:
+        if not sites:
+            return float("inf")
+
+        penalties = []
+        for cascade in cascades.values():
+            dl, dt, pa = compute_cascade_penalties(graph, sites, cascade, T_max)
+            if objective == "DL":
+                penalties.append(dl)
+            elif objective == "DT":
+                penalties.append(dt)
+            elif objective == "PA":
+                penalties.append(pa)
+        return sum(penalties) / len(penalties) if penalties else float("inf")
+
+    # Initialize: compute marginal gain for each node
+    metadata: Dict[str, CELFEntry] = {}
+    heap: List[Tuple[float, str, int]] = []
+
+    baseline_penalty = evaluate_penalty(list(graph.nodes)[:1]) if graph.nodes else 0.0
+
+    for node in graph.nodes:
+        cost = base_costs.get(node, 1.0)
+        entry = CELFEntry(node=node, gain=float("inf"), cost=cost, last_eval=-1)
+        metadata[node] = entry
+        heapq.heappush(heap, (-entry.gain, node, entry.last_eval))
+
+    current_penalty = baseline_penalty
+    current_cost = 0.0
+    budget_cost = float(budget)
+
+    # Greedy selection with lazy evaluation (CELF)
+    while current_cost < budget_cost and heap:
+        while heap:
+            neg_gain, node, snapshot = heapq.heappop(heap)
+            entry = metadata[node]
+
+            if node in selected_set:
+                continue
+            if snapshot != entry.last_eval:
+                continue
+            if current_cost + entry.cost > budget_cost:
+                continue
+
+            # Check if this gain is current
+            if entry.last_eval == len(selected):
+                # This gain is fresh - select this node
+                selected.append(node)
+                selected_set.add(node)
+                current_cost += entry.cost
+                current_penalty -= entry.gain
+                break
+
+            # Recompute marginal gain (lazy evaluation)
+            new_penalty = evaluate_penalty(selected + [node])
+            entry.gain = current_penalty - new_penalty  # Reduction in penalty
+            entry.last_eval = len(selected)
+            heapq.heappush(heap, (-entry.gain, node, entry.last_eval))
+        else:
+            break
+
+    return selected

@@ -8,12 +8,12 @@ MemeTracker format: http://snap.stanford.edu/data/memetracker9.html
 from __future__ import annotations
 
 import gzip
-import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-
+import os
+import pickle
 from .celf import InfluenceGraph
 
 
@@ -113,46 +113,22 @@ def load_costs_from_file(path: str) -> Dict[str, float]:
     return costs
 
 
-def estimate_propagation_probability(
-    time_diff_hours: float,
-    decay_rate: float = 0.01,
-) -> float:
-    """Estimates influence probability from temporal cascade data.
-
-    Uses exponential decay model: p(t) = exp(-α * t)
-
-    Args:
-        time_diff_hours: Time difference between source and target mention
-        decay_rate: Decay parameter α (default: 0.01)
-
-    Returns:
-        Propagation probability in [0, 1]
-    """
-
-    if time_diff_hours < 0:
-        return 0.0
-    prob = math.exp(-decay_rate * time_diff_hours)
-    return min(1.0, max(0.0, prob))
-
-
 def build_graph_from_cascades(
     cascades: list[list[tuple[str, float]]],
-    decay_rate: float = 0.01,
     min_prob: float = 0.01,
 ) -> InfluenceGraph:
     """Constructs an influence graph from temporal cascades.
 
     Each cascade is a list of (node_id, timestamp) pairs showing when
     nodes adopted a meme/information. Creates directed edges from earlier
-    to later adopters with probabilities based on time differences.
+    to later adopters with static probabilities based on co-occurrence frequency.
 
     Args:
         cascades: List of cascades, each cascade is [(node, timestamp), ...]
-        decay_rate: Exponential decay parameter for probability estimation
         min_prob: Minimum probability threshold (edges below are discarded)
 
     Returns:
-        InfluenceGraph with estimated edge probabilities
+        InfluenceGraph with static edge probabilities based on frequency
 
     Example:
         cascades = [
@@ -163,27 +139,37 @@ def build_graph_from_cascades(
     """
 
     graph = InfluenceGraph(default_prob=min_prob)
-    edge_counts: Dict[tuple[str, str], list[float]] = {}
+    edge_counts: Dict[tuple[str, str], int] = {}
+    node_out_counts: Dict[str, int] = {}
 
+    # Count edge occurrences and outgoing edges per node
     for cascade in cascades:
         sorted_cascade = sorted(cascade, key=lambda x: x[1])
 
         for i, (source, t1) in enumerate(sorted_cascade):
+            # Count how many times this node appears before others in cascades
+            node_out_counts[source] = (
+                node_out_counts.get(source, 0) + len(sorted_cascade) - i - 1
+            )
+
             for target, t2 in sorted_cascade[i + 1 :]:
                 time_diff = t2 - t1
                 if time_diff <= 0:
                     continue
 
-                prob = estimate_propagation_probability(time_diff, decay_rate)
-                if prob < min_prob:
-                    continue
-
                 edge = (source, target)
-                edge_counts.setdefault(edge, []).append(prob)
+                edge_counts[edge] = edge_counts.get(edge, 0) + 1
 
-    for (src, dst), probs in edge_counts.items():
-        avg_prob = sum(probs) / len(probs)
-        graph.add_edge(src, dst, avg_prob)
+    # Convert counts to probabilities based on frequency
+    for (src, dst), count in edge_counts.items():
+        # Probability = frequency of this edge / total outgoing connections from source
+        if node_out_counts.get(src, 0) > 0:
+            prob = count / node_out_counts[src]
+        else:
+            prob = min_prob
+
+        if prob >= min_prob:
+            graph.add_edge(src, dst, prob)
 
     return graph
 
@@ -334,19 +320,18 @@ def build_memetracker_cascade(
 def build_graph_from_memetracker(
     path: str,
     top_memes: int = 100,
-    decay_rate: float = 0.01,
     min_prob: float = 0.01,
     max_documents: Optional[int] = None,
 ) -> Tuple[InfluenceGraph, Dict[str, List[Tuple[str, float]]]]:
     """Build influence graph from MemeTracker data file.
 
     Extracts cascades for top memes and constructs a graph where edges
-    represent influence relationships between sites (blogs/news).
+    represent influence relationships between sites (blogs/news) with
+    static probabilities based on co-occurrence frequency.
 
     Args:
         path: Path to MemeTracker file (.txt or .txt.gz)
         top_memes: Number of top memes to track
-        decay_rate: Exponential decay for probability estimation
         min_prob: Minimum edge probability threshold
         max_documents: Optional limit on documents to parse
 
@@ -360,6 +345,24 @@ def build_graph_from_memetracker(
             max_documents=100000
         )
     """
+
+    # Compose cache file names based on input and parameters
+    cache_prefix = f"{os.path.splitext(os.path.basename(path))[0]}_tm{top_memes if top_memes is not None else 'all'}_md{max_documents if max_documents is not None else 'all'}_mp{min_prob}"
+    cache_dir = os.path.join(os.path.dirname(path), "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cascades_cache = os.path.join(cache_dir, cache_prefix + "_cascades.pkl")
+    graph_cache = os.path.join(cache_dir, cache_prefix + "_graph.pkl")
+
+    # Try to load from cache
+    if os.path.exists(cascades_cache) and os.path.exists(graph_cache):
+        print(f"Loading cascades and graph from cache: {cache_dir}")
+        with open(cascades_cache, "rb") as f:
+            cascades_dict = pickle.load(f)
+        with open(graph_cache, "rb") as f:
+            graph = pickle.load(f)
+        print(f"  Loaded {len(cascades_dict)} cascades, {len(graph.nodes)} nodes")
+        return graph, cascades_dict
+
     print(f"Parsing MemeTracker file: {path}")
     documents = parse_memetracker_file(path, max_documents=max_documents)
     print(f"  Parsed {len(documents)} documents")
@@ -372,11 +375,18 @@ def build_graph_from_memetracker(
             if len(phrase_clean) > 5:  # Filter very short phrases
                 meme_counts[phrase_clean] += 1
 
-    # Get top memes
-    top_meme_phrases = sorted(meme_counts.items(), key=lambda x: x[1], reverse=True)[
-        :top_memes
-    ]
-    print(f"  Top meme: '{top_meme_phrases[0][0]}' ({top_meme_phrases[0][1]} mentions)")
+    # Get top memes (or all if top_memes is None)
+    sorted_memes = sorted(meme_counts.items(), key=lambda x: x[1], reverse=True)
+    if top_memes is None:
+        top_meme_phrases = sorted_memes
+    else:
+        top_meme_phrases = sorted_memes[:top_memes]
+    if top_meme_phrases:
+        print(
+            f"  Top meme: '{top_meme_phrases[0][0]}' ({top_meme_phrases[0][1]} mentions)"
+        )
+    else:
+        print("  No memes found.")
 
     # Extract cascades
     cascades_dict: Dict[str, List[Tuple[str, float]]] = {}
@@ -391,9 +401,16 @@ def build_graph_from_memetracker(
 
     print(f"  Extracted {len(all_cascades)} valid cascades")
 
-    # Build graph from cascades
+    # Build graph from cascades (now using static frequency-based probabilities)
     print("  Constructing influence graph...")
-    graph = build_graph_from_cascades(all_cascades, decay_rate, min_prob)
+    graph = build_graph_from_cascades(all_cascades, min_prob)
     print(f"  Graph: {len(graph.nodes)} nodes")
+
+    # Save to cache
+    with open(cascades_cache, "wb") as f:
+        pickle.dump(cascades_dict, f)
+    with open(graph_cache, "wb") as f:
+        pickle.dump(graph, f)
+    print(f"  Saved cascades and graph to cache: {cache_dir}")
 
     return graph, cascades_dict

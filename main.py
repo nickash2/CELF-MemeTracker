@@ -62,7 +62,7 @@ Examples:
     parser.add_argument(
         "--default-prob",
         type=float,
-        default=0.1,
+        default=0.5,
         help="Fallback edge probability when not specified (default: 0.1).",
     )
     parser.add_argument(
