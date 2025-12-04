@@ -1,9 +1,3 @@
-"""
-Heuristic algorithms for influence maximization.
-
-Provides baseline and alternative methods for seed selection to compare against CELF.
-"""
-
 from __future__ import annotations
 
 import random
@@ -114,7 +108,6 @@ def greedy(
         nodes_to_check = graph.nodes - selected_set
 
         for node in nodes_to_check:
-            # Simple greedy does not handle budget constraints with variable costs well
             # This implementation assumes unit costs for simplicity in selection loop
 
             gain = (
@@ -143,57 +136,44 @@ def pagerank(
     max_iterations: int = 100,
     tolerance: float = 1e-6,
 ) -> Tuple[List[str], float]:
-    """Selects nodes based on PageRank centrality.
+    """Accurate PageRank centrality using incoming neighbors for efficiency."""
 
-    Args:
-        graph: The influence graph.
-        budget: The number of nodes to select.
-        costs: Optional node costs (not used by this heuristic).
-        damping: Damping factor (default: 0.85).
-        max_iterations: Maximum iterations for convergence.
-        tolerance: Convergence tolerance.
-
-    Returns:
-        Tuple of (selected seeds, total cost).
-    """
     nodes = list(graph.nodes)
     n = len(nodes)
     if n == 0:
         return [], 0.0
 
-    # Initialize PageRank scores
+    # Initialize scores
     scores = {node: 1.0 / n for node in nodes}
 
-    # Build outgoing edges count
+    # Precompute outgoing degree
     out_degree = {node: len(graph.neighbors(node)) for node in nodes}
 
-    # Iterative PageRank computation
-    for iteration in range(max_iterations):
+    # Precompute incoming neighbors for each node
+    incoming = {node: [] for node in nodes}
+    for node in nodes:
+        for neighbor, _ in graph.neighbors(node):
+            incoming[neighbor].append(node)
+
+    # Iterative PageRank
+    for _ in range(max_iterations):
         new_scores = {}
         diff = 0.0
-
         for node in nodes:
-            # Sum contributions from incoming edges
-            rank_sum = 0.0
-            for other_node in nodes:
-                if other_node == node:
-                    continue
-                # Check if other_node points to node
-                for neighbor, _ in graph.neighbors(other_node):
-                    if neighbor == node and out_degree[other_node] > 0:
-                        rank_sum += scores[other_node] / out_degree[other_node]
-                        break
-
+            rank_sum = sum(
+                scores[src] / out_degree[src]
+                for src in incoming[node]
+                if out_degree[src] > 0
+            )
             new_score = (1 - damping) / n + damping * rank_sum
             new_scores[node] = new_score
             diff += abs(new_score - scores[node])
 
         scores = new_scores
-
         if diff < tolerance:
             break
 
-    # Select top k nodes by PageRank
+    # Select top-k
     sorted_nodes = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     seeds = [node for node, _ in sorted_nodes[:budget]]
     total_cost = sum(costs.get(node, 1.0) for node in seeds) if costs else float(budget)
@@ -229,7 +209,6 @@ def betweenness_centrality(
         nodes if k_samples is None else random.sample(nodes, min(k_samples, len(nodes)))
     )
 
-    # Approximate betweenness using BFS from sample nodes
     for source in sample_nodes:
         # BFS to find shortest paths
         queue = [source]

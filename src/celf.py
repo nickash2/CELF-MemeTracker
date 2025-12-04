@@ -1,12 +1,3 @@
-"""
-Faithful implementation of the Cost-Effective Lazy Forward (CELF) algorithm.
-
-The code mirrors Algorithms 1 (LazyForward / CELF) and 2 (GetBound) from
-Leskovec et al., KDD'07. It targets the independent cascade (IC) diffusion
-model, supports optional sensor costs, and exposes both UC and CB variants
-along with the online upper bound R^.
-"""
-
 from __future__ import annotations
 
 import collections
@@ -121,8 +112,6 @@ def _has_feasible_extension(
     current_cost: float,
     budget: float,
 ) -> bool:
-    """Checks for at least one node that can still be added under the budget."""
-
     for entry in entries.values():
         if entry.node in selected:
             continue
@@ -139,8 +128,6 @@ def _lazy_forward(
     rng: random.Random,
     mode: str,
 ) -> Tuple[List[str], float, float]:
-    """Implements LazyForward as described in Algorithm 1 of the paper."""
-
     if mode not in {"UC", "CB"}:
         raise ValueError("mode must be either 'UC' or 'CB'.")
 
@@ -195,8 +182,6 @@ def run_celf(
     costs: Optional[Mapping[str, float]] = None,
     rng: Optional[random.Random] = None,
 ) -> Tuple[List[str], float, float, str]:
-    """Runs CELF by comparing the UC and CB variants from Algorithm 1."""
-
     if budget <= 0:
         raise ValueError("budget must be a positive value.")
     if simulations <= 0:
@@ -278,6 +263,95 @@ def compute_online_bound(
     return r_hat
 
 
+def fast_greedy_outbreak_detection(
+    graph,
+    cascades: dict,
+    budget: int,
+    objective: str = "DL",
+    T_max: float = 100.0,
+    rng: Optional[random.Random] = None,
+    sample_size: int = 10000,
+) -> list:
+    """
+    Approximate greedy outbreak detection for large datasets.
+
+    Args:
+        graph: InfluenceGraph
+        cascades: meme_id -> [(site, time), ...]
+        budget: number of sensors
+        objective: 'DL', 'DT', or 'PA'
+        T_max: max time for DT
+        rng: optional random number generator
+        sample_size: number of cascades to sample for evaluation
+
+    Returns:
+        List of selected nodes
+    """
+    from .objectives import compute_cascade_penalties
+
+    rng = rng or random.Random()
+    nodes = list(graph.nodes)
+    selected = []
+    selected_set = set()
+
+    # Sample a subset of cascades for speed
+    all_cascades = list(cascades.values())
+    if sample_size > 0 and len(all_cascades) > sample_size:
+        sampled_cascades = rng.sample(all_cascades, sample_size)
+    else:
+        sampled_cascades = all_cascades
+
+    # Precompute per-node earliest detection for DL/DT/PA if possible
+    def evaluate_candidate(candidate_node):
+        total = 0.0
+        for cascade in sampled_cascades:
+            dl, dt, pa = compute_cascade_penalties(
+                cascade, selected + [candidate_node], T_max=T_max
+            )
+            if objective == "DL":
+                total += dl
+            elif objective == "DT":
+                total += dt
+            elif objective == "PA":
+                total += pa
+        # Return average reduction (DL: fewer=better, DT/PA: smaller=better)
+        return total / len(sampled_cascades)
+
+    # Initialize current penalty with empty selection
+    current_penalty = 0.0
+    for cascade in sampled_cascades:
+        dl, dt, pa = compute_cascade_penalties(cascade, [], T_max=T_max)
+        if objective == "DL":
+            current_penalty += dl
+        elif objective == "DT":
+            current_penalty += dt
+        elif objective == "PA":
+            current_penalty += pa
+    current_penalty /= len(sampled_cascades)
+
+    for _ in range(budget):
+        best_gain = -float("inf")
+        best_node = None
+
+        for node in nodes:
+            if node in selected_set:
+                continue
+            candidate_penalty = evaluate_candidate(node)
+            gain = current_penalty - candidate_penalty
+            if gain > best_gain:
+                best_gain = gain
+                best_node = node
+
+        if best_node is None:
+            break
+
+        selected.append(best_node)
+        selected_set.add(best_node)
+        current_penalty -= best_gain
+
+    return selected
+
+
 def greedy_outbreak_detection(
     graph: InfluenceGraph,
     cascades: Dict[str, List[Tuple[str, float]]],
@@ -304,7 +378,8 @@ def greedy_outbreak_detection(
             return float("inf")
         penalties = []
         for cascade in cascades.values():
-            dl, dt, pa = compute_cascade_penalties(graph, sites, cascade, T_max)
+            # Pass T_max as a keyword argument
+            dl, dt, pa = compute_cascade_penalties(cascade, sites, T_max=T_max)
             if objective == "DL":
                 penalties.append(dl)
             elif objective == "DT":
@@ -313,9 +388,10 @@ def greedy_outbreak_detection(
                 penalties.append(pa)
         return sum(penalties) / len(penalties) if penalties else float("inf")
 
-    current_penalty = evaluate_penalty(list(graph.nodes)[:1]) if graph.nodes else 0.0
+    # Start with a baseline penalty using empty selection
+    current_penalty = evaluate_penalty([])
 
-    # Greedy selection (recompute all gains each iteration)
+    # Greedy selection: recompute gain for every candidate each iteration
     while current_cost < budget_cost:
         best_node = None
         best_gain = -float("inf")
@@ -353,6 +429,8 @@ def celf_outbreak_detection(
     objective: str = "PA",  # "DL", "DT", or "PA"
     T_max: float = 100.0,
     costs: Optional[Mapping[str, float]] = None,
+    sample_size: int = 0,
+    rng: Optional[random.Random] = None,
 ) -> List[str]:
     """
     CELF for outbreak detection using observed cascades.
@@ -377,14 +455,22 @@ def celf_outbreak_detection(
     selected: List[str] = []
     selected_set: Set[str] = set()
 
+    # Sample a subset of cascades if requested
+    all_cascades = list(cascades.values())
+    if sample_size > 0 and len(all_cascades) > sample_size:
+        rng = rng or random.Random()
+        cascades_to_use = rng.sample(all_cascades, sample_size)
+    else:
+        cascades_to_use = all_cascades
+
     # Helper: compute average penalty on all cascades
     def evaluate_penalty(sites: List[str]) -> float:
         if not sites:
             return float("inf")
 
         penalties = []
-        for cascade in cascades.values():
-            dl, dt, pa = compute_cascade_penalties(graph, sites, cascade, T_max)
+        for cascade in cascades_to_use:
+            dl, dt, pa = compute_cascade_penalties(cascade, sites, T_max=T_max)
             if objective == "DL":
                 penalties.append(dl)
             elif objective == "DT":
@@ -409,7 +495,6 @@ def celf_outbreak_detection(
     current_cost = 0.0
     budget_cost = float(budget)
 
-    # Greedy selection with lazy evaluation (CELF)
     while current_cost < budget_cost and heap:
         while heap:
             neg_gain, node, snapshot = heapq.heappop(heap)

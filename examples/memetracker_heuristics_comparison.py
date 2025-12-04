@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""
-Comprehensive heuristics comparison on MemeTracker dataset.
-
-Compares CELF with baseline heuristics on real cascade data:
-- Random selection
-- Degree centrality (in/out)
-- PageRank
-- Betweenness centrality
-- Greedy
-
-Evaluates solutions on three objectives:
-- Detection Likelihood (DL): fraction of cascades detected
-- Detection Time (DT): average time until detection
-- Population Affected (PA): average nodes infected before detection
-
-Generates comparison plots showing penalty reduction vs. number of sensors.
-"""
-
 import argparse
 import random
 import sys
@@ -33,10 +15,11 @@ from src import (
     evaluate_detection_likelihood,
     evaluate_detection_time,
     evaluate_population_affected,
-    greedy_outbreak_detection,
+    fast_greedy_outbreak_detection,
     pagerank,
     plot_multi_objective_comparison,
     random_selection,
+    plot_bounds_vs_budget,
 )
 from src.celfpp import celfpp_outbreak_detection
 
@@ -101,9 +84,7 @@ def main():
 
     args = parser.parse_args()
 
-    print("=" * 80)
     print("MEMETRACKER HEURISTICS COMPARISON")
-    print("=" * 80)
 
     # Build graph from MemeTracker data
     print(f"\n1. Building influence graph from {args.input}")
@@ -145,7 +126,6 @@ def main():
         print("\nError: No valid cascade events. Need cascades with >= 2 nodes.")
         return
 
-    # Setup
     rng = random.Random(args.seed)
     budgets = sorted(args.budgets)
 
@@ -157,36 +137,55 @@ def main():
     print(f"   Max time: {args.max_time}")
     print(f"   Baseline PA (no monitors): {baseline_pa:.1f}")
 
+    SAMPLE_SIZE = 250
+
     # Algorithms to compare
     algorithms = {
-        # Outbreak detection algorithms (use exact cascade evaluation)
-        "CELF": lambda g, k: celf_outbreak_detection(
-            g, cascades_dict, k, objective=args.objective, T_max=args.max_time
+        "Greedy": lambda g, k: fast_greedy_outbreak_detection(
+            g,
+            cascades_dict,
+            k,
+            objective=args.objective,
+            T_max=args.max_time,
+            sample_size=SAMPLE_SIZE,
+            rng=rng,
         ),
-        "CELF++": lambda g, k: celfpp_outbreak_detection(
-            g, cascades_dict, k, objective=args.objective, T_max=args.max_time
-        ),
-        "Greedy": lambda g, k: greedy_outbreak_detection(
-            g, cascades_dict, k, objective=args.objective, T_max=args.max_time
-        ),
-        # Heuristic algorithms (structure-based, no cascades needed)
         "Out-Degree": lambda g, k: degree_centrality(g, k, mode="out")[0],
         "In-Degree": lambda g, k: degree_centrality(g, k, mode="in")[0],
         "PageRank": lambda g, k: pagerank(g, k)[0],
-        "Betweenness": lambda g, k: betweenness_centrality(g, k, k_samples=100)[0],
+        "Betweenness": lambda g, k: betweenness_centrality(
+            g, k, k_samples=SAMPLE_SIZE - 220
+        )[0],
         "Random": lambda g, k: random_selection(g, k, rng=rng)[0],
+        "CELF": lambda g, k: celf_outbreak_detection(
+            g,
+            cascades_dict,
+            k,
+            objective=args.objective,
+            T_max=args.max_time,
+            sample_size=SAMPLE_SIZE,
+            rng=rng,
+        ),
+        "CELF++": lambda g, k: celfpp_outbreak_detection(
+            g,
+            cascades_dict,
+            k,
+            objective=args.objective,
+            T_max=args.max_time,
+            sample_size=SAMPLE_SIZE,
+            rng=rng,
+        ),
     }
 
     # Run comparison
-    print(f"\n{'=' * 80}")
     print("Running heuristics comparison...")
-    print(f"{'=' * 80}\n")
 
     results = {}
+    celf_bounds = []
+    celfpp_bounds = []
 
     for alg_name, alg_func in algorithms.items():
         print(f"\n{alg_name}:")
-        print("-" * 40)
 
         results[alg_name] = {"DL": [], "DT": [], "PA": []}
 
@@ -224,21 +223,24 @@ def main():
                 results[alg_name]["PA"].append((budget, 0.0))
 
     # Generate comparison plot
-    print(f"\n{'=' * 80}")
     print("Generating comparison plots...")
-    print(f"{'=' * 80}")
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     plot_multi_objective_comparison(results, output_path=str(output_path))
 
-    print(f"\n{'=' * 80}")
+    # Plot bounds for CELF and CELF++
+    if celf_bounds or celfpp_bounds:
+        plot_bounds_vs_budget(
+            celf_bounds,
+            celfpp_bounds,
+            output_path="results/figures/bounds_vs_budget.png",
+        )
+
     print("COMPARISON COMPLETE!")
-    print(f"{'=' * 80}")
     print(f"\nResults saved to: {output_path}")
     print("\nSummary:")
-    print("-" * 40)
 
     for alg_name in algorithms.keys():
         max_budget = budgets[-1]
@@ -250,8 +252,6 @@ def main():
             f"{alg_name:15s} (k={max_budget}): "
             f"DL={dl_final:.3f} DT_red={dt_final:.3f} PA={pa_final:.1f}"
         )
-
-    print("\n" + "=" * 80)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,4 @@
-"""
-Evaluation utilities for CELF algorithm.
-
-Provides runtime tracking, bound comparisons, and visualization tools for
-analyzing algorithm performance and comparing different heuristics.
-"""
-
 from __future__ import annotations
-
 import json
 import time
 from dataclasses import asdict, dataclass
@@ -111,6 +103,75 @@ def plot_spread_vs_budget(
     print(f"Plot saved to {output_path}")
 
 
+def plot_bounds_vs_budget(
+    results: List[CELFResult],
+    output_path: str = "results/figures/bounds_vs_budget.png",
+    title: str = "CELF Solution vs Online/Offline Bounds",
+) -> None:
+    """
+    Plot CELF solution, online bound, and offline bound vs budget.
+
+    Args:
+        results: List of CELFResult for different budgets.
+        output_path: Filepath to save the figure.
+        title: Plot title.
+    """
+    # Sort results by budget
+    results_sorted = sorted(results, key=lambda r: r.budget)
+    budgets = [r.budget for r in results_sorted]
+    celf_spread = [r.spread for r in results_sorted]
+    online_bounds = [
+        r.online_bound if r.online_bound is not None else np.nan for r in results_sorted
+    ]
+    offline_bounds = [
+        r.offline_bound if r.offline_bound is not None else np.nan
+        for r in results_sorted
+    ]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        budgets,
+        celf_spread,
+        "o-",
+        label="CELF Solution",
+        linewidth=2,
+        markersize=8,
+        color="forestgreen",
+    )
+    plt.plot(
+        budgets,
+        online_bounds,
+        "s--",
+        label="Online Bound",
+        linewidth=2,
+        markersize=6,
+        color="orange",
+        alpha=0.8,
+    )
+    plt.plot(
+        budgets,
+        offline_bounds,
+        "D--",
+        label="Offline Bound",
+        linewidth=2,
+        markersize=6,
+        color="red",
+        alpha=0.7,
+    )
+
+    plt.xlabel("Budget", fontsize=12)
+    plt.ylabel("Expected Influence Spread", fontsize=12)
+    plt.title(title, fontsize=14)
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"Bounds vs budget plot saved to {output_path}")
+
+
 def plot_runtime_comparison(
     comparisons: List[HeuristicComparison],
     output_path: str = "results/figures/runtime_comparison.png",
@@ -203,62 +264,6 @@ def plot_spread_comparison(
     print(f"Plot saved to {output_path}")
 
 
-def plot_bounds_comparison(
-    result: CELFResult,
-    output_path: str = "results/figures/bounds_comparison.png",
-    title: str = "CELF Solution vs Bounds",
-) -> None:
-    """Visualize CELF solution quality relative to online/offline bounds."""
-    metrics = ["CELF Solution"]
-    values = [result.spread]
-
-    if result.online_bound is not None:
-        metrics.append("Online Bound")
-        values.append(result.online_bound)
-
-    if result.offline_bound is not None:
-        metrics.append("Offline Bound")
-        values.append(result.offline_bound)
-
-    colors = ["forestgreen", "orange", "red"]
-    plt.figure(figsize=(10, 6))
-    bars = plt.bar(metrics, values, color=colors[: len(metrics)], alpha=0.8)
-
-    # Add value labels
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height,
-            f"{height:.2f}",
-            ha="center",
-            va="bottom",
-            fontsize=11,
-        )
-
-    # Add approximation ratio if available
-    if result.online_bound and result.online_bound > 0:
-        ratio = result.spread / result.online_bound
-        plt.text(
-            0.5,
-            max(values) * 0.9,
-            f"Approximation Ratio: {ratio:.3f}",
-            ha="center",
-            fontsize=12,
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-        )
-
-    plt.ylabel("Expected Influence Spread", fontsize=12)
-    plt.title(title, fontsize=14)
-    plt.grid(True, axis="y", alpha=0.3)
-    plt.tight_layout()
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"Plot saved to {output_path}")
-
-
 def plot_marginal_gains(
     seeds: List[str],
     marginal_spreads: List[float],
@@ -336,12 +341,9 @@ def create_summary_report(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:
-        f.write("=" * 80 + "\n")
         f.write("CELF ALGORITHM PERFORMANCE SUMMARY\n")
-        f.write("=" * 80 + "\n\n")
 
         f.write("CELF Results:\n")
-        f.write("-" * 80 + "\n")
         for i, result in enumerate(results, 1):
             f.write(f"\nRun {i}:\n")
             f.write(f"  Budget: {result.budget:.2f}\n")
@@ -359,7 +361,6 @@ def create_summary_report(
 
         if comparisons:
             f.write("\n\nHeuristic Comparisons:\n")
-            f.write("-" * 80 + "\n")
             for comp in comparisons:
                 f.write(f"\n{comp.algorithm_name}:\n")
                 f.write(f"  Spread: {comp.spread:.3f}\n")

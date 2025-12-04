@@ -9,6 +9,7 @@ from .celf import (
     greedy_outbreak_detection,
     run_celf,
     simulate_independent_cascade,
+    fast_greedy_outbreak_detection,
 )
 from .evaluation import (
     CELFResult,
@@ -24,6 +25,7 @@ from .evaluation import (
     plot_runtime_comparison,
     plot_spread_comparison,
     plot_spread_vs_budget,
+    plot_bounds_vs_budget,
     save_results,
 )
 from .heuristics import (
@@ -40,13 +42,11 @@ from .objectives import (
     DetectionResult,
     compute_penalty_reduction,
     convert_memetracker_cascades_to_events,
-    detect_cascade,
+    detect_cascade_fast,
     evaluate_detection_likelihood,
     evaluate_detection_time,
     evaluate_population_affected,
     evaluate_solution_on_objectives,
-    generate_random_cascades,
-    simulate_cascade_with_times,
 )
 from .preprocessing import (
     MemeTrackerDocument,
@@ -55,10 +55,11 @@ from .preprocessing import (
     build_memetracker_cascade,
     load_costs_from_file,
     load_graph_from_file,
-    parse_memetracker_file,
 )
 
 __all__ = [
+    "plot_bounds_vs_budget",
+    "fast_greedy_outbreak_detection",
     "CELFEntry",
     "InfluenceGraph",
     "celf_outbreak_detection",
@@ -73,7 +74,6 @@ __all__ = [
     "load_costs_from_file",
     "load_graph_from_file",
     "MemeTrackerDocument",
-    "parse_memetracker_file",
     "CELFResult",
     "HeuristicComparison",
     "PerformanceTracker",
@@ -99,7 +99,7 @@ __all__ = [
     "DetectionResult",
     "compute_penalty_reduction",
     "convert_memetracker_cascades_to_events",
-    "detect_cascade",
+    "detect_cascade_fast",
     "evaluate_detection_likelihood",
     "evaluate_detection_time",
     "evaluate_population_affected",

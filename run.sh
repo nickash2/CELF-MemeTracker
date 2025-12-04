@@ -1,10 +1,9 @@
 #!/bin/zsh
 
-# Activate your Python environment if needed
-# source venv/bin/activate
+source venv/bin/activate
 
 # Install requirements (uncomment if needed)
-# pip install -r requirements.txt
+pip install -r requirements.txt
 
 INPUT="data/quotes_2008-08.txt"
 RESULTS_DIR="results/figures"
@@ -15,9 +14,9 @@ for OBJ in DL DT PA; do
   OUT="$RESULTS_DIR/memetracker_comparison_${OBJ}.png"
   python examples/memetracker_heuristics_comparison.py \
     --input "$INPUT" \
-    --budgets 1 2 3 4 5 10 20 50 100 \
-    --max-docs 0 \
-    --top-memes 0 \
+    --budgets 1 2 3 4 5 6 7 8 9 10 \
+    --max-docs -1 \
+    --top-memes -1 \
     --objective $OBJ \
     --output "$OUT"
   echo "Results saved to: $OUT"

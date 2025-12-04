@@ -1,13 +1,7 @@
-"""
-CELF++ implementation for outbreak detection (influence maximization with lazy forward selection).
-
-This version is adapted for exact cascade evaluation (no Monte Carlo), matching the outbreak detection setup.
-"""
-
-from typing import Dict, List, Tuple, Callable
+from typing import Dict, List, Tuple, Callable, Optional
+import random
 import heapq
 
-# Type aliases for clarity
 graph_type = any  # Should be InfluenceGraph, but avoid circular import
 cascade_dict_type = Dict[str, List[Tuple[str, float]]]
 
@@ -19,6 +13,8 @@ def celfpp_outbreak_detection(
     objective: str = "DL",
     T_max: float = 100.0,
     eval_func: Callable = None,
+    sample_size: int = 0,
+    rng: Optional[random.Random] = None,
 ) -> List[str]:
     """
     CELF++ for outbreak detection (exact cascade evaluation, no MC).
@@ -58,10 +54,13 @@ def celfpp_outbreak_detection(
         else:
             raise ValueError(f"Unknown objective: {objective}")
 
-    # Convert cascades to events (site, time)
     from . import convert_memetracker_cascades_to_events, evaluate_population_affected
 
     cascade_events = convert_memetracker_cascades_to_events(cascades)
+    # Sample a subset of cascades if requested
+    if sample_size > 0 and len(cascade_events) > sample_size:
+        rng = rng or __import__("random").Random()
+        cascade_events = rng.sample(cascade_events, sample_size)
     all_nodes = set(graph.nodes)
     selected: List[str] = []
     gains = []

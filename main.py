@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import random
-import time
 from typing import Optional, Sequence
 
 from src import (
